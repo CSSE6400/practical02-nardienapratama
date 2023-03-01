@@ -12,8 +12,7 @@ class Todo(db.Model):
     description = db.Column(db.String(120), nullable=True)
     # This column has a default value of False
     completed = db.Column(db.Boolean, nullable=False, default=False)
-    deadline_at = db.Column(db.DateTime, nullable=True)
-    
+    deadline_at = db.Column(db.DateTime, nullable=True)   
     # This column has a default value which is a function call
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
