@@ -1,9 +1,14 @@
 from flask import Blueprint, jsonify, request
 from todo.models import db
 from todo.models.todo import Todo
-from datetime import datetime
- 
+from datetime import datetime, timedelta
+from sqlalchemy import exc
+
 api = Blueprint('api', __name__, url_prefix='/api/v1') 
+
+class UnknownFieldException(Exception):
+    "Raised when there are unknown fields."
+    pass
 
 TEST_ITEM = {
     "id": 1,
@@ -24,10 +29,19 @@ def health():
 @api.route('/todos', methods=['GET'])
 def get_todos():
     """Return the list of todo items"""
+    completed = request.args.get('completed')
+    window = request.args.get('window', 100)
     todos = Todo.query.all()
     result = []
     for todo in todos:
-        result.append(todo.to_dict())
+        if completed == 'true':
+            if todo.completed is True:
+                if todo.deadline_at < (datetime.now() + timedelta(days=int(window))):
+                    result.append(todo.to_dict())
+        else:
+            if todo.deadline_at < (datetime.now() + timedelta(days=int(window))):
+                result.append(todo.to_dict())
+
     return jsonify(result)
 
 @api.route('/todos/<int:todo_id>', methods=['GET'])
@@ -41,21 +55,36 @@ def get_todo(todo_id):
 @api.route('/todos', methods=['POST'])
 def create_todo():
     """Create a new todo item and return the created item"""
-    todo = Todo(
-        title=request.json.get('title'),
-        description=request.json.get('description'),
-        completed=request.json.get('completed', False),
-    )
-    if 'deadline_at' in request.json:
-        todo.deadline_at = datetime.fromisoformat(request.json.get('deadline_at'))
+    try:
+        todo = Todo(
+            title=request.json.get('title'),
+            description=request.json.get('description'),
+            completed=request.json.get('completed', False),
+        )
+        if 'deadline_at' in request.json:
+            todo.deadline_at = datetime.fromisoformat(request.json.get('deadline_at'))
 
-    # Adds a new record to the database or will update an existing record
-    db.session.add(todo)
+        if todo.title == '':
+            raise exc.IntegrityError
 
-    # Commits the changes to the daatabase, this must be called for the changes to be saved
-    db.session.commit()
+        if len(set(request.json.keys()) - {'title', 'description', 'completed', 'deadline_at'}) > 0:
+            raise UnknownFieldException
 
-    return jsonify(todo.to_dict()), 201
+        # Adds a new record to the database or will update an existing record
+        db.session.add(todo)
+
+        # Commits the changes to the daatabase, this must be called for the changes to be saved
+        db.session.commit()
+        return jsonify(todo.to_dict()), 201
+    
+    except exc.IntegrityError as e:
+        print(str(e))
+        db.session.rollback()
+        return jsonify({'error': 'Failed to create Todo'}), 400
+
+    except UnknownFieldException:
+        return jsonify({'error': 'There are missing or extra fields'}), 400
+
 
 @api.route('/todos/<int:todo_id>', methods=['PUT'])
 def update_todo(todo_id):
@@ -63,6 +92,9 @@ def update_todo(todo_id):
     todo = Todo.query.get(todo_id)
     if todo is None:
         return jsonify({'error': 'Todo not found'}), 404
+
+    if todo.id != request.json.get('id'):
+        return jsonify({'error': 'Todo ID does not match ID in JSON object'}), 400
 
     todo.title = request.json.get('title', todo.title)
     todo.description = request.json.get('description', todo.description)
