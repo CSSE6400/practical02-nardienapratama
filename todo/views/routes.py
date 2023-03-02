@@ -8,7 +8,9 @@ api = Blueprint('api', __name__, url_prefix='/api/v1')
 
 class UnknownFieldException(Exception):
     "Raised when there are unknown fields."
-    pass
+
+class IDMismatchException(Exception):
+    "Todo ID does not match ID in JSON object"
 
 TEST_ITEM = {
     "id": 1,
@@ -67,7 +69,7 @@ def create_todo():
         if todo.title == '':
             raise exc.IntegrityError
 
-        if len(set(request.json.keys()) - {'title', 'description', 'completed', 'deadline_at'}) > 0:
+        if len(set(request.json.keys()) - {'title', 'description', 'completed', 'deadline_at', 'created_at', 'updated_at'}) > 0:
             raise UnknownFieldException
 
         # Adds a new record to the database or will update an existing record
@@ -89,20 +91,30 @@ def create_todo():
 @api.route('/todos/<int:todo_id>', methods=['PUT'])
 def update_todo(todo_id):
     """Update a todo item and return the updated item"""
-    todo = Todo.query.get(todo_id)
-    if todo is None:
-        return jsonify({'error': 'Todo not found'}), 404
+    try:
+        todo = Todo.query.get(todo_id)
+        if todo is None:
+            return jsonify({'error': 'Todo not found'}), 404
 
-    if todo.id != request.json.get('id'):
-        return jsonify({'error': 'Todo ID does not match ID in JSON object'}), 400
+        if len(set(request.json.keys()) - {'title', 'description', 'completed', 'deadline_at', 'created_at', 'updated_at'}) > 0:
+                raise UnknownFieldException
 
-    todo.title = request.json.get('title', todo.title)
-    todo.description = request.json.get('description', todo.description)
-    todo.completed = request.json.get('completed', todo.completed)
-    todo.deadline_at = request.json.get('deadline_at', todo.deadline_at)
-    db.session.commit()
+        if request.json.get('id'):
+            if todo.id != request.json.get('id'):
+                raise IDMismatchException
 
-    return jsonify(todo.to_dict())
+        todo.title = request.json.get('title', todo.title)
+        todo.description = request.json.get('description', todo.description)
+        todo.completed = request.json.get('completed', todo.completed)
+        todo.deadline_at = request.json.get('deadline_at', todo.deadline_at)
+        db.session.commit()
+
+        return jsonify(todo.to_dict())
+    except UnknownFieldException:
+        return jsonify({'error': 'There are missing or extra fields'}), 400
+    
+    except IDMismatchException:
+        return jsonify({'Todo ID does not match ID in JSON object'}), 400
 
 @api.route('/todos/<int:todo_id>', methods=['DELETE'])
 def delete_todo(todo_id):
